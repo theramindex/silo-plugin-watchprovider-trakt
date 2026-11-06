@@ -32,6 +32,10 @@ The plugin keeps to Trakt's rate limits for each connection: one write per secon
 
 Until the client ID and secret are set, every Trakt request fails with a message asking an administrator to configure the plugin.
 
+## Disconnecting
+
+A profile disconnects Trakt from the same watch-provider settings it connected from. Silo deletes the connection and stops syncing; watch history, ratings, and lists already imported into Silo stay. The plugin does not revoke the sign-in on Trakt's side, so remove the app at [trakt.tv/oauth/authorized_applications](https://trakt.tv/oauth/authorized_applications) to revoke its access as well.
+
 ## Moving from Silo's Trakt support
 
 Silo's Trakt removal deleted every Trakt connection and the saved client ID and secret, and disabled the original plugin. Watch history Silo imported from Trakt stays. After installing this plugin:
@@ -55,7 +59,7 @@ make build
 
 ## Releasing
 
-Releases follow the ramindex plugin catalog's `RELEASING.md`: bump `manifest.json`, push a `v<version>` tag, then update the catalog entry.
+Every push to `main` runs the **Release** workflow, which releases and updates the catalog entry when the commits since the last tag include `feat`, `fix`, `perf`, `revert`, or a breaking change. `RELEASING.md` in the ramindex plugin catalog covers the details and the manual fallback.
 
 ## License
 

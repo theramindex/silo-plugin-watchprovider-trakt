@@ -160,7 +160,7 @@ func TestListAccountLimitIsAConnectionFault(t *testing.T) {
 	event := movieEvent("movie-1", pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_ADD_TO_WATCHLIST, map[string]string{"tmdb": "1"})
 	response := applyEvents(t, server, event)
 	if f := response.GetFault(); f.GetCode() != pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMISSION_DENIED ||
-		f.GetSafeMessage() != "Trakt request POST /sync/watchlist failed (HTTP 420): the Trakt account has reached its limit of 100 items; Trakt VIP raises the limit" {
+		f.GetSafeMessage() != "The Trakt account has reached its limit of 100 items; Trakt VIP raises the limit (Trakt POST /sync/watchlist returned HTTP 420)" {
 		t.Fatalf("fault = %v", f)
 	}
 }

@@ -185,39 +185,41 @@ var digitsPattern = regexp.MustCompile(`^[0-9]{1,12}$`)
 // before Trakt's 2026 authentication migration fail this way. The other account
 // and app statuses say who can fix them.
 func responseFault(method, path string, sentToken bool, result httpResult) *pluginv1.WatchSyncFault {
-	failed := fmt.Sprintf("Trakt request %s %s failed (HTTP %d)", method, path, result.status)
+	// The advice leads; the request details follow for whoever reads logs.
 	code := oauthErrorCode(result.errorBody)
+	detail := fmt.Sprintf(" (Trakt %s %s returned HTTP %d", method, path, result.status)
 	if code != "" {
-		failed += " (" + code + ")"
+		detail += ", " + code
 	}
+	detail += ")"
 	switch {
 	case code == "invalid_grant", result.status == http.StatusUnauthorized && sentToken:
 		return newFault(pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
-			failed+": Trakt no longer accepts this connection's sign-in; reconnect Trakt")
+			"Trakt no longer accepts this connection's sign-in; reconnect Trakt"+detail)
 	case result.status == http.StatusUnauthorized, result.status == http.StatusForbidden:
 		return newFault(pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMISSION_DENIED,
-			failed+": Trakt rejected the server's app credentials; an administrator should check the Trakt client ID and secret in the plugin settings")
+			"Trakt rejected the server's app credentials; an administrator should check the Trakt client ID and secret in the plugin settings"+detail)
 	case result.status == statusAccountLimitExceeded:
 		if limit := strings.TrimSpace(result.header.Get("X-Account-Limit")); digitsPattern.MatchString(limit) {
 			return newFault(pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMISSION_DENIED,
-				failed+": the Trakt account has reached its limit of "+limit+" items; Trakt VIP raises the limit")
+				"The Trakt account has reached its limit of "+limit+" items; Trakt VIP raises the limit"+detail)
 		}
 		return newFault(pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMISSION_DENIED,
-			failed+": the Trakt account has reached an item limit; Trakt VIP raises the limit")
+			"The Trakt account has reached an item limit; Trakt VIP raises the limit"+detail)
 	case result.status == http.StatusLocked:
 		return newFault(pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMISSION_DENIED,
-			failed+": the Trakt account is locked or deactivated; its owner should contact Trakt support")
+			"The Trakt account is locked or deactivated; its owner should contact Trakt support"+detail)
 	case result.status == http.StatusUpgradeRequired:
 		return newFault(pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMISSION_DENIED,
-			failed+": this Trakt feature needs Trakt VIP")
+			"This Trakt feature needs Trakt VIP"+detail)
 	case result.status == http.StatusNotFound:
 		return newFault(pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_REQUEST,
-			failed+": Trakt could not find the item")
+			"Trakt could not find the item"+detail)
 	default:
 		// Other refusals stay retryable: Silo's built-in provider recorded a
 		// failed batch, which the host retries a few times, rather than items
 		// Trakt does not know.
-		return temporaryFault(failed)
+		return temporaryFault("Trakt could not complete the request; it will be retried" + detail)
 	}
 }
 
