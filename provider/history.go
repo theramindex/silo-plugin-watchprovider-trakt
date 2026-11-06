@@ -123,8 +123,7 @@ func (s *Server) addNewPlays(ctx context.Context, client *apiClient, stopAt time
 		switch {
 		case unchecked[play.index] != nil:
 			group.out[play.index] = resultFromFault(group.events[play.index].GetEventId(), unchecked[play.index])
-		case remote[play.matchKey] > 0:
-			remote[play.matchKey]--
+		case remote.consume(play.matchKey):
 			group.set(play.index, pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE)
 		default:
 			send = append(send, play)
@@ -148,16 +147,33 @@ func (s *Server) addNewPlays(ctx context.Context, client *apiClient, stopAt time
 	return nil
 }
 
-// remotePlays counts the plays Trakt holds around the given plays, by match
+// remotePlayIndex shares one consumable row across every identifier alias.
+// Consuming an IMDb match must also consume that row's TMDB/episode aliases.
+type remotePlayMatch struct{ consumed bool }
+type remotePlayIndex map[string][]*remotePlayMatch
+
+func (index remotePlayIndex) consume(key string) bool {
+	for len(index[key]) > 0 {
+		match := index[key][0]
+		index[key] = index[key][1:]
+		if !match.consumed {
+			match.consumed = true
+			return true
+		}
+	}
+	return false
+}
+
+// remotePlays indexes the plays Trakt holds around the given plays, by match
 // key. It reads the history between the earliest and the latest play, and
 // splits the plays in two whenever that window holds more than
 // historyWindowMaxPages pages, so a batch spread over years costs a few small
 // reads instead of the whole history. unchecked holds the fault for each play
 // whose window could not be read in this call.
-func (s *Server) remotePlays(ctx context.Context, client *apiClient, stopAt time.Time, plays []localPlay) (map[string]int, map[int]*pluginv1.WatchSyncFault, *pluginv1.WatchSyncFault) {
+func (s *Server) remotePlays(ctx context.Context, client *apiClient, stopAt time.Time, plays []localPlay) (remotePlayIndex, map[int]*pluginv1.WatchSyncFault, *pluginv1.WatchSyncFault) {
 	sorted := slices.Clone(plays)
 	slices.SortStableFunc(sorted, func(a, b localPlay) int { return a.watchedAt.Compare(b.watchedAt) })
-	remote := make(map[string]int)
+	remote := make(remotePlayIndex)
 	unchecked := make(map[int]*pluginv1.WatchSyncFault)
 	// Windows can share a minute; a play Trakt returns twice counts once.
 	counted := make(map[int64]bool)
@@ -208,8 +224,10 @@ func (s *Server) remotePlays(ctx context.Context, client *apiClient, stopAt time
 				}
 				counted[item.ID] = true
 			}
+			match := &remotePlayMatch{}
 			for _, key := range remoteItemKeys(item) {
-				remote[playMatchKey(item.Type, key, item.WatchedAt)]++
+				matchKey := playMatchKey(item.Type, key, item.WatchedAt)
+				remote[matchKey] = append(remote[matchKey], match)
 			}
 		}
 	}
@@ -222,7 +240,7 @@ func (s *Server) remotePlays(ctx context.Context, client *apiClient, stopAt time
 // is "tmdb:603" while Trakt's row also carries its IMDb id, and an episode
 // Silo knows only by show and number is "show:tvdb:79126:s1:e2" while Trakt's
 // row carries the episode's own ids. Only a play of the same item in the same
-// minute can match, so each extra key is safe.
+// minute can match. All keys share one consumable history row.
 func remoteItemKeys(item traktHistoryItem) []string {
 	var keys []string
 	add := func(key string) {

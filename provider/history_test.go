@@ -199,29 +199,56 @@ func TestApplyWatchedFindsAnEpisodeKnownOnlyByShowAndNumber(t *testing.T) {
 // export reconciliation; a repeated event ID is still one play.
 func TestApplyWatchedCountsPlaysAndIgnoresRepeatedEventIDs(t *testing.T) {
 	t.Parallel()
-	fake, server := newFakeHistory(t)
-	minute := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
-	fake.add(fakePlay{kind: "movie", ids: traktIDs{TMDB: 603}, watchedAt: minute})
-
-	first := watchedMovie("history-0", "603", minute.Add(10*time.Second))
-	second := watchedMovie("history-1", "603", minute.Add(30*time.Second))
-	repeat := watchedMovie("history-1", "603", minute.Add(30*time.Second))
-	response := applyEvents(t, server, first, second, repeat)
-	if response.GetFault() != nil || len(response.GetResults()) != 3 {
-		t.Fatalf("response = %v", response)
-	}
-	want := []pluginv1.WatchSyncApplyStatus{
-		pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE,
-		pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
-		pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
-	}
-	for index, result := range response.GetResults() {
-		if result.GetStatus() != want[index] {
-			t.Errorf("result %d = %v, want %v", index, result, want[index])
-		}
-	}
-	if len(fake.posts) != 1 || len(fake.posts[0].Movies) != 1 {
-		t.Fatalf("writes = %+v, want the one new play", fake.posts)
+	for _, variant := range []string{"same key", "movie aliases", "movie aliases with complete IDs", "episode aliases"} {
+		t.Run(variant, func(t *testing.T) {
+			fake, server := newFakeHistory(t)
+			minute := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+			remote := fakePlay{kind: "movie", ids: traktIDs{TMDB: 603, IMDb: "tt0133093"}, watchedAt: minute}
+			first := watchedMovie("history-0", "603", minute.Add(10*time.Second))
+			second := watchedMovie("history-1", "603", minute.Add(30*time.Second))
+			switch variant {
+			case "movie aliases", "movie aliases with complete IDs":
+				second.ProviderItemKey = "imdb:tt0133093"
+				second.Media.ExternalIds = map[string]string{"imdb": "tt0133093"}
+				if variant == "movie aliases with complete IDs" {
+					first.Media.ExternalIds = map[string]string{"tmdb": "603", "imdb": "tt0133093"}
+					second.Media.ExternalIds = first.Media.ExternalIds
+				}
+			case "episode aliases":
+				remote = fakePlay{kind: "episode", ids: traktIDs{TVDB: 349232}, show: traktIDs{TVDB: 79126}, season: 1, number: 2, watchedAt: minute}
+				first.ProviderItemKey = "show:tvdb:79126:s1:e2"
+				first.Media = &pluginv1.WatchSyncMedia{MediaType: pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE, SeriesExternalIds: map[string]string{"tvdb": "79126"}, SeasonNumber: 1, EpisodeNumber: 2}
+				second.ProviderItemKey = "tvdb:349232"
+				second.Media = &pluginv1.WatchSyncMedia{MediaType: pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE, ExternalIds: map[string]string{"tvdb": "349232"}, SeriesExternalIds: map[string]string{"tvdb": "79126"}, SeasonNumber: 1, EpisodeNumber: 2}
+			}
+			fake.add(remote)
+			response := applyEvents(t, server, first, second, second)
+			if response.GetFault() != nil || len(response.GetResults()) != 3 {
+				t.Fatalf("response = %v", response)
+			}
+			want := []pluginv1.WatchSyncApplyStatus{
+				pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE,
+				pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
+				pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
+			}
+			for index, result := range response.GetResults() {
+				if result.GetStatus() != want[index] {
+					t.Errorf("result %d = %v, want %v", index, result, want[index])
+				}
+			}
+			if len(fake.posts) != 1 || len(fake.posts[0].Movies)+len(fake.posts[0].Episodes) != 1 {
+				t.Fatalf("writes = %+v, want the one new play", fake.posts)
+			}
+			replay := applyEvents(t, server, first, second)
+			for _, result := range replay.GetResults() {
+				if result.GetStatus() != pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE {
+					t.Errorf("replay = %v", replay)
+				}
+			}
+			if replay.GetFault() != nil || len(fake.posts) != 1 || len(fake.plays) != 2 {
+				t.Fatalf("replay duplicated a play: response=%v plays=%d writes=%d", replay, len(fake.plays), len(fake.posts))
+			}
+		})
 	}
 }
 
