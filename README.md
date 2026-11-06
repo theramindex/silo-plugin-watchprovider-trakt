@@ -1,5 +1,7 @@
 # Trakt watch-provider plugin for Silo
 
+## Provides a fix for everything showing as COPS in trakt when scrobbled
+
 Syncs Silo profiles with their [Trakt](https://trakt.tv) accounts through Silo's `watch_sync_provider.v1` plugin contract.
 
 This is the ramindex fork of [Silo-Server/silo-plugin-watchprovider-trakt](https://github.com/Silo-Server/silo-plugin-watchprovider-trakt), which Silo archived when it dropped Trakt support. Silo's host refuses the original plugin ID, `silo.watchprovider.trakt`, so this fork ships as `silo.ramindex.trakt` from the ramindex plugin catalog. Silo registers it like any other third-party watch provider.

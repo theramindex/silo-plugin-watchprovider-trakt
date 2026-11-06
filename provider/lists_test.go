@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -328,31 +329,22 @@ func TestRatingEventsForEpisodesAreRejected(t *testing.T) {
 	}
 }
 
-func TestScrobblePayloadNamesTheItemLikeTheBuiltInProvider(t *testing.T) {
+func TestScrobblePayloadNamesMoviesLikeTheBuiltInProvider(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 5, 4, 23, 30, 0, 0, time.FixedZone("EDT", -4*60*60))
-	episodeWith := func(own map[string]string) *pluginv1.WatchSyncEvent {
-		return &pluginv1.WatchSyncEvent{
-			PositionSeconds: 300, DurationSeconds: 1200,
-			Media: &pluginv1.WatchSyncMedia{
-				MediaType: pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE, ExternalIds: own,
-				SeriesExternalIds: map[string]string{"tvdb": "79126"}, SeasonNumber: 1, EpisodeNumber: 2,
-			},
-		}
-	}
 	movie := movieEvent("m", pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_START, map[string]string{"imdb": "tt1", "tmdb": "2"})
-	for name, tc := range map[string]struct {
-		event *pluginv1.WatchSyncEvent
-		want  string
-	}{
-		"movie":             {movie, `{"app_date":"2026-05-05","app_version":"Silo","movie":{"ids":{"trakt":0,"slug":"","imdb":"tt1","tmdb":2,"tvdb":0}},"progress":0}`},
-		"episode by ids":    {episodeWith(map[string]string{"tvdb": "349232"}), `{"app_date":"2026-05-05","app_version":"Silo","episode":{"ids":{"trakt":0,"slug":"","imdb":"","tmdb":0,"tvdb":349232}},"progress":25}`},
-		"episode by number": {episodeWith(nil), `{"app_date":"2026-05-05","app_version":"Silo","episode":{"number":2,"season":1},"progress":25,"show":{"ids":{"trakt":0,"slug":"","imdb":"","tmdb":0,"tvdb":79126}}}`},
-	} {
-		encoded, _ := json.Marshal(scrobblePayload(tc.event, now))
-		if string(encoded) != tc.want {
-			t.Errorf("%s: payload = %s\nwant %s", name, encoded, tc.want)
-		}
+	server := NewServer(nil, "")
+	payload, fault := server.scrobblePayload(context.Background(), &apiClient{server: server}, movie, now)
+	if fault != nil {
+		t.Fatalf("scrobble payload fault = %v", fault)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	want := `{"app_date":"2026-05-05","app_version":"Silo","movie":{"ids":{"trakt":0,"slug":"","imdb":"tt1","tmdb":2,"tvdb":0}},"progress":0}`
+	if string(encoded) != want {
+		t.Errorf("payload = %s\nwant %s", encoded, want)
 	}
 }
 

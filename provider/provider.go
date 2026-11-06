@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -27,8 +28,8 @@ const (
 	timeLimitMessage     = "Trakt sync time limit reached; the event will be retried"
 )
 
-// Server implements the watch-sync provider for Trakt. It keeps no state
-// between RPCs except the in-memory request pacing, keyed by token digest.
+// Server implements the watch-sync provider for Trakt. Playback lifecycle
+// events share a bounded cache of resolved episode IDs, alongside request pacing.
 type Server struct {
 	pluginv1.UnimplementedWatchSyncProviderServer
 	http      *http.Client
@@ -38,6 +39,11 @@ type Server struct {
 	// reads per access token.
 	writes *credentialLimiter
 	pages  *credentialLimiter
+
+	// episodeIDCache stores canonical Trakt IDs for series/season/episode
+	// tuples so start, pause, and stop do not repeat the same metadata lookups.
+	episodeIDMu    sync.RWMutex
+	episodeIDCache map[string]int
 	// responseBytes bounds the encoded items of one ListRemoteState response.
 	responseBytes int
 	// sleep and now are replaced by tests.
@@ -56,8 +62,9 @@ func NewServer(httpClient *http.Client, version string) *Server {
 		baseURL:   defaultBaseURL,
 		userAgent: userAgent(version),
 		writes:    newCredentialLimiter(writeInterval, writeBurst),
-		pages:     newCredentialLimiter(pageInterval, pageBurst),
-		sleep:     sleepContext,
+		pages:          newCredentialLimiter(pageInterval, pageBurst),
+		episodeIDCache: make(map[string]int),
+		sleep:          sleepContext,
 		// Well inside gRPC's 4 MiB message limit.
 		responseBytes: 2 << 20,
 		now:           time.Now,
